@@ -1960,6 +1960,17 @@ button.ob.on{opacity:1;font-weight:700;background:rgba(128,128,128,0.2);box-shad
   <button class="tb on" id="motsdr-ax"  onclick="motsDrToggle('ax')">XYZ AXES       <span class="bdg">ON</span></button>
   <button class="tb"    id="motsdr-rot" onclick="motsDrToggle('rot')">AUTO ROTATE    <span class="bdg">OFF</span></button>
   <button class="tb on" id="motsdr-nuc" onclick="motsDrToggle('nuc')">NUCLEUS        <span class="bdg">ON</span></button>
+  <div class="sl">INTERNUCLEAR DISTANCE</div>
+  <div class="sb">
+    <label>DISTANCE <b id="mots-d-val" style="color:var(--accent)">auto a₀</b></label>
+    <input type="range" id="mots-d-slider" min="0.5" max="200" step="0.5" value="2"
+      style="width:100%;accent-color:var(--accent)"
+      oninput="motsSetDLabel(+this.value)"
+      onpointerup="motsRebuild(+this.value)"
+      ontouchend="motsRebuild(+this.value)">
+  </div>
+  <div class="sl">OVERLAP INTEGRAL</div>
+  <div id="mots-overlap-val" style="font-size:.58rem;color:var(--accent);font-weight:700;padding:4px 2px;letter-spacing:.06em">S = —</div>
   <div class="sl">APPEARANCE</div>
   <div class="sb"><label>SURFACE OPACITY <b id="mots-vsop">1.00</b></label><input type="range" min="0.05" max="1" step="0.01" value="1" oninput="motsDrAdj('surfop',+this.value)"></div>
   <div class="sl">PHASE LEGEND</div>
@@ -15702,6 +15713,21 @@ window.motsDrToggle=function(k){
 window.motsDrAdj=function(k,v){
   if(k==='surfop'){_ms.surfOp=v;var l=document.getElementById('mots-vsop');if(l)l.textContent=v.toFixed(2);Object.keys(_ms.surfaces).forEach(function(id){(_ms.surfaces[id].meshes||[]).forEach(function(m){if(m.material){m.material.opacity=v;m.material.transparent=v<0.999;m.material.depthWrite=v>=0.999;m.material.needsUpdate=true;}});});_ms._dirty=true;}
 };
+window.motsSetDLabel=function(v){
+  var el=document.getElementById('mots-d-val');if(el)el.textContent=(+v).toFixed(1)+' a\u2080';
+};
+window.motsRebuild=function(v){
+  _msUserD=+v;
+  // Rebuild all active surfaces with new distance
+  var keys=Object.keys(_ms.surfaces);
+  if(!keys.length)return;
+  keys.forEach(function(key){
+    var s=_ms.surfaces[key];
+    _msRemove(key);
+    _msBuild(s.n,s.l,s.m,s.isAnti,key);
+  });
+};
+};
 window.motsDrResetCam=function(){if(_ms.cam){_ms.cam.position.set(0,0,600);_ms.cam.lookAt(0,0,0);if(_ms.controls){_ms.controls.target.set(0,0,0);_ms.controls.update();}_ms._dirty=true;}};
 window.motsSectToggle=function(k){var b=document.getElementById('mots-sect-'+k);if(!b)return;var open=b.style.display!=='none';b.style.display=open?'none':'block';var h=b.previousElementSibling;if(h){var a=h.querySelector('.mot-sect-arr');if(a)a.textContent=open?'►':'▼';}};
 
@@ -15714,7 +15740,15 @@ function _orbLbl(n,l,m){var s=['s','p','d','f','g','h','i','j','k','l'];var sub=
 function _getPb(lA,m,isAnti){var am=Math.abs(m);var base=(am===0)?((lA%2===0)?1:-1):(((lA-am)%2===0)?1:-1);return isAnti?-base:base;}
 
 // Default internuclear distance for given n,l
-function _defaultD(n,l){var d=2.0;for(var li=1;li<=l;li++)d+=li+1.5;return d+(n-(l+1))*3.0;}
+// Default internuclear distance — scales with n² like Bohr radius
+function _defaultD(n,l){
+  if(l===0) return Math.max(2.0, n*n*0.8);
+  var d=n*n*0.8; for(var li=1;li<=l;li++) d+=li*1.2;
+  return Math.max(2.5, d);
+}
+
+// Global override distance (null = use default)
+var _msUserD=null;
 
 window.motsNSync=function(type,n){var c=_MBOT[type];if(!c)return;var v=document.getElementById('mots-n-'+type+'-val');if(v)v.textContent=n;_motsRow(type,n);};
 
@@ -16118,38 +16152,74 @@ function _msBuild(n,l,m,isAnti,key){
 
   setTimeout(function(){
     var pb=_getPb(l,m,isAnti);
-    var d=_defaultD(n,l);
+    var d=(_msUserD!==null)?_msUserD:_defaultD(n,l);
+    _msUserD=d; // keep consistent
     var dSc=d*SC;
+
+    // Sync distance slider UI
+    var dSlider=document.getElementById('mots-d-slider');
+    var dVal=document.getElementById('mots-d-val');
+    if(dSlider){dSlider.max=Math.max(200,Math.ceil(d*3));dSlider.value=d;}
+    if(dVal)dVal.textContent=d.toFixed(1)+' a\u2080';
 
     // Update nuclei positions
     _msNuclei(dSc);
 
-    // Determine grid bounds — must be large enough to contain entire orbital
-    var bound=Math.max(n*n*SC*3.0, dSc*5.0, 300);
-    var gridN=Math.min(128, Math.max(72, Math.floor(90/(n||1)*2)));
+    // Determine grid bounds — must contain entire orbital
+    var orbRadius=Math.max(n*n*SC*2.5, dSc*4.0, 200);
+    var bound=orbRadius;
+    // Fixed step size ~5 units ensures thin features are captured
+    // gridN = 2*bound/step, capped at 160 for performance
+    var step=Math.max(4, bound/70);
+    var gridN=Math.min(160, Math.max(60, Math.round(2*bound/step)));
 
-    // Find peak |ψ| for threshold — more samples for higher n
+    // Find peak |ψ| — systematic grid sampling near nuclei for accuracy
     var peak=0;
-    var nSamp=Math.max(800, n*120);
+    var nSamp=Math.max(1000, n*150);
     for(var i=0;i<nSamp;i++){
-      var rr=(Math.random()*n*n*6)*SC;
+      // Sample uniformly within bound sphere
+      var rr=Math.cbrt(Math.random())*bound;
       var th=Math.acos(2*Math.random()-1),ph=2*Math.PI*Math.random();
-      var sx=rr*Math.sin(th)*Math.cos(ph), sy=rr*Math.sin(th)*Math.sin(ph), sz=rr*Math.cos(th)+dSc;
+      var sx=rr*Math.sin(th)*Math.cos(ph), sy=rr*Math.sin(th)*Math.sin(ph);
+      // Sample near atom A
+      var sz=rr*Math.cos(th)+dSc;
       var v=Math.abs(_lcaoPsi(sx,sy,sz,n,l,m,n,l,m,pb,dSc));
       if(v>peak)peak=v;
       // Sample near atom B
       sz=rr*Math.cos(th)-dSc;
       v=Math.abs(_lcaoPsi(sx,sy,sz,n,l,m,n,l,m,pb,dSc));
       if(v>peak)peak=v;
-      // Sample near midpoint for overlap region
+      // Sample midpoint
       sz=rr*Math.cos(th);
       v=Math.abs(_lcaoPsi(sx,sy,sz,n,l,m,n,l,m,pb,dSc));
       if(v>peak)peak=v;
     }
     if(peak<1e-20){if(typeof toast==='function')toast('No surface found');return;}
-    // Lower threshold for higher n — captures thin overlap lobes
-    var isoFrac=Math.max(0.04, 0.14-n*0.008);
-    var iso=peak*isoFrac;
+    // Fixed fraction — 10% of peak gives good solid surfaces for all n
+    var iso=peak*0.10;
+
+    // ── Compute overlap integral S = ∫ ψ_A* ψ_B dV (Monte Carlo) ──
+    (function(){
+      var nMC=2000, sumS=0, sumN=0;
+      var xb2=dSc/SC;
+      for(var i=0;i<nMC;i++){
+        var rr2=(Math.random()*n*n*6)*SC;
+        var th2=Math.acos(2*Math.random()-1),ph2=2*Math.PI*Math.random();
+        var sx2=rr2*Math.sin(th2)*Math.cos(ph2),sy2=rr2*Math.sin(th2)*Math.sin(ph2),sz2=rr2*Math.cos(th2);
+        var xb3=sx2/SC,yb3=sy2/SC,zb3=sz2/SC;
+        var dzA2=zb3-xb2,rA2=Math.sqrt(xb3*xb3+yb3*yb3+dzA2*dzA2);if(rA2<1e-12)rA2=1e-12;
+        var tA2=Math.acos(Math.min(1,Math.max(-1,dzA2/rA2))),pA2=Math.atan2(yb3,xb3);
+        var wA2=Rnl(n,l,rA2)*Ylm(l,m,tA2,pA2);
+        var dzB2=zb3+xb2,rB2=Math.sqrt(xb3*xb3+yb3*yb3+dzB2*dzB2);if(rB2<1e-12)rB2=1e-12;
+        var tB2=Math.acos(Math.min(1,Math.max(-1,dzB2/rB2))),pB2=Math.atan2(yb3,xb3);
+        var wB2=Rnl(n,l,rB2)*Ylm(l,m,tB2,pB2);
+        sumS+=wA2*wB2*(rr2*rr2); sumN+=wA2*wA2*(rr2*rr2);
+      }
+      var S=sumN>1e-30?(sumS/sumN):0;
+      S=Math.max(-1,Math.min(1,S));
+      var el=document.getElementById('mots-overlap-val');
+      if(el)el.textContent='S = '+(S>=0?'+':'')+S.toFixed(3)+'  '+(S>0.15?'✦ BONDING':S<-0.05?'✦ ANTIBONDING':'~ WEAK');
+    })();
 
     var result=_marchCubes(function(x,y,z){return _lcaoPsi(x,y,z,n,l,m,n,l,m,pb,dSc);},iso,iso,gridN,bound);
 
@@ -16203,3 +16273,4 @@ function _msRefresh(){
 </script>
 </body>
 </html>
+
