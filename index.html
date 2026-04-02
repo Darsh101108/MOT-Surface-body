@@ -1990,10 +1990,17 @@ button.ob.on{opacity:1;font-weight:700;background:rgba(128,128,128,0.2);box-shad
 
 <!-- MOT SURFACE BODY BOTTOM PANEL -->
 <div id="motsurf-panel" style="position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);z-index:200;max-height:52vh;display:none;transition:transform .35s ease">
-  <div id="motsurf-ptg" style="height:44px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:.56rem;color:var(--dim);letter-spacing:.13em" onclick="document.getElementById('motsurf-panel').classList.toggle('col')">
-    <span class="pa">▲</span><span>MOLECULAR ORBITALS — SURFACE BODY</span><span class="pa">▲</span>
+  <div style="border-bottom:1px solid var(--border)">
+    <div id="motsurf-ptg" style="height:44px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;font-size:.56rem;color:var(--dim);letter-spacing:.13em" onclick="document.getElementById('motsurf-panel').classList.toggle('col')">
+      <span class="pa">▲</span><span>MOLECULAR ORBITALS — SURFACE BODY</span><span class="pa">▲</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 14px 7px;border-top:1px solid var(--border)">
+      <span style="font-size:.5rem;color:var(--dim);letter-spacing:.12em;white-space:nowrap;flex-shrink:0">OPACITY</span>
+      <input type="range" min="0.05" max="1" step="0.01" value="1" style="flex:1;accent-color:var(--accent);cursor:pointer;height:3px" oninput="motsDrAdj('surfop',+this.value);document.getElementById('mots-vsop').textContent=(+this.value).toFixed(2);document.getElementById('motsurf-panel-op-val').textContent=(+this.value).toFixed(2)">
+      <span id="motsurf-panel-op-val" style="font-size:.52rem;color:var(--accent);font-weight:700;width:28px;text-align:right;flex-shrink:0">1.00</span>
+    </div>
   </div>
-  <div id="motsurf-panel-body" style="overflow-y:auto;max-height:calc(52vh - 44px);padding:6px 14px 10px">
+  <div id="motsurf-panel-body" style="overflow-y:auto;max-height:calc(52vh - 88px);padding:6px 14px 10px">
 
     <div class="mot-sect">
       <div class="mot-sect-hd" onclick="motsSectToggle('sigma')"><span style="color:rgba(0,212,255,.8)">σ  SIGMA &nbsp;<span style="font-size:.44rem;opacity:.55;font-weight:400">|m|=0 · 2 lobes</span></span><span class="mot-sect-arr">▼</span></div>
@@ -15727,14 +15734,24 @@ window.motsRebuild=function(v){
     _msBuild(s.n,s.l,s.m,s.isAnti,key);
   });
 };
-};
 window.motsDrResetCam=function(){if(_ms.cam){_ms.cam.position.set(0,0,600);_ms.cam.lookAt(0,0,0);if(_ms.controls){_ms.controls.target.set(0,0,0);_ms.controls.update();}_ms._dirty=true;}};
 window.motsSectToggle=function(k){var b=document.getElementById('mots-sect-'+k);if(!b)return;var open=b.style.display!=='none';b.style.display=open?'none':'block';var h=b.previousElementSibling;if(h){var a=h.querySelector('.mot-sect-arr');if(a)a.textContent=open?'►':'▼';}};
 
 // Bond type config: |m|, min n, color
 var _MBOT={sigma:{m:0,minN:1,col:'#00d4ff'},pi:{m:1,minN:2,col:'#ffc800'},delta:{m:2,minN:3,col:'#22ff66'},phi:{m:3,minN:4,col:'#ff0099'},gamma:{m:4,minN:5,col:'#cc44ff'},eta:{m:5,minN:6,col:'#ff7744'},theta:{m:6,minN:7,col:'#00ffaa'},iota:{m:7,minN:8,col:'#ff44aa'},kappa:{m:8,minN:9,col:'#44ffff'},lambda:{m:9,minN:10,col:'#ffaa00'}};
 
-function _orbLbl(n,l,m){var s=['s','p','d','f','g','h','i','j','k','l'];var sub=s[l]||('l'+l);if(l===0)return n+sub;if(l===1){if(m===0)return n+sub+'z';if(m===1)return n+sub+'x';if(m===-1)return n+sub+'y';}return n+sub+(m===0?'':m>0?'+'+m:''+m);}
+function _orbLbl(n,l,m){
+  var sub=['s','p','d','f','g','h','i','j','k','l'];
+  var nm=sub[l]||(l+'?');
+  var sup=function(s){return s.replace(/0/g,'\u2070').replace(/1/g,'\u00b9').replace(/2/g,'\u00b2').replace(/3/g,'\u00b3').replace(/4/g,'\u2074').replace(/5/g,'\u2075').replace(/6/g,'\u2076').replace(/7/g,'\u2077').replace(/8/g,'\u2078').replace(/9/g,'\u2079');};
+  var base=n+nm;
+  if(l===0)return base;
+  if(l===1){if(m===0)return base+'z';if(m===1)return base+'x';if(m===-1)return base+'y';}
+  if(l===2){if(m===0)return base+'z'+sup('2');if(m===1)return base+'xz';if(m===-1)return base+'yz';if(m===2)return base+'x'+sup('2')+'-y'+sup('2');if(m===-2)return base+'xy';}
+  if(l===3){if(m===0)return base+'z'+sup('3');if(m===1)return base+'xz'+sup('2');if(m===-1)return base+'yz'+sup('2');if(m===2)return base+'z(x'+sup('2')+'-y'+sup('2')+')';if(m===-2)return base+'xyz';if(m===3)return base+'x'+sup('3');if(m===-3)return base+'y'+sup('3');}
+  if(m===0)return base+'(m=0)';
+  return base+(m>0?'(m=+'+m+')':'(m='+m+')');
+}
 
 // Phase factor: determines if bonding or antibonding topology
 function _getPb(lA,m,isAnti){var am=Math.abs(m);var base=(am===0)?((lA%2===0)?1:-1):(((lA-am)%2===0)?1:-1);return isAnti?-base:base;}
@@ -16273,4 +16290,5 @@ function _msRefresh(){
 </script>
 </body>
 </html>
+
 
