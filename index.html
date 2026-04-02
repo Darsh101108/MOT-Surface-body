@@ -8,9 +8,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&family=Dancing+Script:wght@700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&family=Dancing+Script:wght@700&display=swap" rel="stylesheet"></noscript>
 <script src="https://code.responsivevoice.org/responsivevoice.js?key=FREE" async></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+  crossorigin="anonymous"
+  onerror="var fb=document.createElement('script');fb.src='https://cdn.jsdelivr.net/npm/three@0.128/three.min.js';fb.crossOrigin='anonymous';document.head.appendChild(fb);"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"
+  crossorigin="anonymous"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"></noscript>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
@@ -3970,13 +3976,7 @@ button.ob.on{opacity:1;font-weight:700;background:rgba(128,128,128,0.2);box-shad
   <div id="sb-dbtn" style="overflow-y:auto;height:calc(var(--ph) - 42px - 40px)"></div>
 </div>
 
-<!-- THREE.JS — primary CDN with jsdelivr fallback -->
-<script>window._threeLoaded=false;</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
-  onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/three@0.128/three.min.js';document.head.appendChild(s);"
-  onload="window._threeLoaded=true;"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"
-  onerror="console.warn('OrbitControls failed to load')"></script>
+<!-- THREE.JS loaded from <head> -->
 <script>
 // ═══════════════════════════════════════════════════════
 // GLOBALS
@@ -16326,6 +16326,7 @@ function _msRefresh(){
 </script>
 </body>
 </html>
+
 
 
 
