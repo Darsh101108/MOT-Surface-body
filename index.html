@@ -16124,15 +16124,15 @@ function _msBuild(n,l,m,isAnti,key){
     // Update nuclei positions
     _msNuclei(dSc);
 
-    // Determine grid bounds — scale with n²
-    var bound=Math.max(n*n*SC*1.5, dSc*3.0);
-    var gridN=Math.min(128, Math.max(80, Math.floor(100/(n||1)*2)));
+    // Determine grid bounds — must be large enough to contain entire orbital
+    var bound=Math.max(n*n*SC*3.0, dSc*5.0, 300);
+    var gridN=Math.min(128, Math.max(72, Math.floor(90/(n||1)*2)));
 
     // Find peak |ψ| for threshold — more samples for higher n
     var peak=0;
-    var nSamp=Math.max(600, n*80);
+    var nSamp=Math.max(800, n*120);
     for(var i=0;i<nSamp;i++){
-      var rr=(Math.random()*n*n*4)*SC;
+      var rr=(Math.random()*n*n*6)*SC;
       var th=Math.acos(2*Math.random()-1),ph=2*Math.PI*Math.random();
       var sx=rr*Math.sin(th)*Math.cos(ph), sy=rr*Math.sin(th)*Math.sin(ph), sz=rr*Math.cos(th)+dSc;
       var v=Math.abs(_lcaoPsi(sx,sy,sz,n,l,m,n,l,m,pb,dSc));
@@ -16203,4 +16203,3 @@ function _msRefresh(){
 </script>
 </body>
 </html>
-
