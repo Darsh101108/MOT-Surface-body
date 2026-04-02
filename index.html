@@ -1995,9 +1995,12 @@ button.ob.on{opacity:1;font-weight:700;background:rgba(128,128,128,0.2);box-shad
       <span class="pa">▲</span><span>MOLECULAR ORBITALS — SURFACE BODY</span><span class="pa">▲</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;padding:5px 14px 7px;border-top:1px solid var(--border)">
-      <span style="font-size:.5rem;color:var(--dim);letter-spacing:.12em;white-space:nowrap;flex-shrink:0">OPACITY</span>
-      <input type="range" min="0.05" max="1" step="0.01" value="1" style="flex:1;accent-color:var(--accent);cursor:pointer;height:3px" oninput="motsDrAdj('surfop',+this.value);document.getElementById('mots-vsop').textContent=(+this.value).toFixed(2);document.getElementById('motsurf-panel-op-val').textContent=(+this.value).toFixed(2)">
-      <span id="motsurf-panel-op-val" style="font-size:.52rem;color:var(--accent);font-weight:700;width:28px;text-align:right;flex-shrink:0">1.00</span>
+      <span style="font-size:.5rem;color:var(--dim);letter-spacing:.1em;white-space:nowrap;flex-shrink:0">d</span>
+      <input type="range" id="mots-d-slider-panel" min="0.5" max="200" step="0.5" value="2" style="flex:1;accent-color:var(--accent);cursor:pointer;height:3px"
+        oninput="motsSetDLabel(+this.value);document.getElementById('mots-d-slider').value=this.value"
+        onpointerup="motsRebuild(+this.value);document.getElementById('mots-d-slider').value=this.value"
+        ontouchend="motsRebuild(+this.value);document.getElementById('mots-d-slider').value=this.value">
+      <span id="mots-d-val-panel" style="font-size:.52rem;color:var(--accent);font-weight:700;width:52px;text-align:right;flex-shrink:0">auto a₀</span>
     </div>
   </div>
   <div id="motsurf-panel-body" style="overflow-y:auto;max-height:calc(52vh - 88px);padding:6px 14px 10px">
@@ -8378,25 +8381,41 @@ function buildWavePlane(n,l,m){
     wS.add(wPlaneMesh);
 
     // ── Circular ring lines + radial spokes ──────────────────────────
+    // Pre-cache psi values per vertex so render loop just scales by cosT
     var wireGroup=new THREE.Group();
     var wireMat=new THREE.LineBasicMaterial({color:NC[n-1],transparent:true,opacity:0.3});
+    var maxPsiRawW=wPlaneMesh.geometry.userData.maxPsiRaw||1;
     var ringStep=Math.max(1,Math.floor(NRw/16));
     for(var ri=0;ri<NRw;ri+=ringStep){
         var base=1+ri*W, rpts=[];
+        var wpsiW=[];
         for(var pi=0;pi<=NPHIw;pi++){
             var vi=base+pi;
             rpts.push(new THREE.Vector3(positions[vi*3],0,positions[vi*3+2]));
+            var ox=positions[vi*3], oz=positions[vi*3+2];
+            var r3w=Math.sqrt(ox*ox+oz*oz);
+            var pvRaw2=(r3w<0.1)?Rnl(n,l,0.001)*Ylm(l,m,Math.PI/2,0):Rnl(n,l,r3w/SCALE)*Ylm(l,m,Math.PI/2,Math.atan2(oz,ox));
+            wpsiW.push(pvRaw2/maxPsiRawW);
         }
-        wireGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(rpts),wireMat));
+        var lg=new THREE.BufferGeometry().setFromPoints(rpts);
+        lg.userData.psiCache=wpsiW;
+        wireGroup.add(new THREE.Line(lg,wireMat));
     }
     var spokeStep=Math.max(1,Math.floor(NPHIw/24));
     for(var pi=0;pi<NPHIw;pi+=spokeStep){
         var spts=[new THREE.Vector3(0,0,0)];
+        var wpsiW2=[0];
         for(var ri=0;ri<NRw;ri++){
             var vi=1+ri*W+pi;
             spts.push(new THREE.Vector3(positions[vi*3],0,positions[vi*3+2]));
+            var ox=positions[vi*3], oz=positions[vi*3+2];
+            var r3w=Math.sqrt(ox*ox+oz*oz);
+            var pvRaw2=(r3w<0.1)?Rnl(n,l,0.001)*Ylm(l,m,Math.PI/2,0):Rnl(n,l,r3w/SCALE)*Ylm(l,m,Math.PI/2,Math.atan2(oz,ox));
+            wpsiW2.push(pvRaw2/maxPsiRawW);
         }
-        wireGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(spts),wireMat));
+        var lg2=new THREE.BufferGeometry().setFromPoints(spts);
+        lg2.userData.psiCache=wpsiW2;
+        wireGroup.add(new THREE.Line(lg2,wireMat));
     }
     wireGroup.visible=wOpts.grid;
     wS.add(wireGroup);
@@ -8408,33 +8427,42 @@ function buildWavePlane(n,l,m){
 function wOmega(n){ return 0.6/Math.max(1,n*n*0.18); }
 
 window.wR=wR; window.wS=wS; window.wCam=wCam;
+var _wLastCosT=2, _wDirty=true;
 window.wTick=function(){
-    if(wOpts.play) wTime+=0.035;
-    wCtrl.update();
+    var ctrlChanged=wCtrl.update();
     if(wOpts.rot) wCtrl.autoRotate=true; else wCtrl.autoRotate=false;
 
+    var needRender=ctrlChanged||_wDirty;
+    if(wOpts.play){ wTime+=0.035; needRender=true; }
+    if(!needRender){ return; }
+    _wDirty=false;
+
+    var cosT=Math.cos(wOmega(wN)*wTime);
+
     if(wCloud && wOpts.wave && wCloud.geometry.userData.psi0){
-        var psi0=wCloud.geometry.userData.psi0;
-        var filled=wCloud.geometry.userData.filled;
-        var colAttr=wCloud.geometry.getAttribute('color');
-        var cosT=Math.cos(wOmega(wN)*wTime);
+        // Only update colors if cosT changed enough to be visible
+        var cosDiff=Math.abs(cosT-_wLastCosT);
+        if(cosDiff>0.008){
+            _wLastCosT=cosT;
+            var psi0=wCloud.geometry.userData.psi0;
+            var filled=wCloud.geometry.userData.filled;
+            var colAttr=wCloud.geometry.getAttribute('color');
 
-        // Positive phase = orbital color, negative phase = white
-        var bc=new THREE.Color(NC[wN-1]);
-        var posPhase = 0.55 + 0.45*Math.abs(cosT);   // 0.55 → 1.0
-        var negPhase = 0.40 + 0.30*Math.abs(cosT);   // 0.40 → 0.70
+            // Positive phase = orbital color, negative phase = white
+            var bc=new THREE.Color(NC[wN-1]);
+            var posPhase = 0.55 + 0.45*Math.abs(cosT);
+            var negPhase = 0.40 + 0.30*Math.abs(cosT);
 
-        for(var i=0;i<filled;i++){
-            var sign = (psi0[i]>=0 ? 1 : -1) * (cosT>=0 ? 1 : -1);
-            if(sign>0){
-                // Orbital color
-                colAttr.setXYZ(i, bc.r*posPhase, bc.g*posPhase, bc.b*posPhase);
-            } else {
-                // White
-                colAttr.setXYZ(i, negPhase, negPhase, negPhase);
+            for(var i=0;i<filled;i++){
+                var sign = (psi0[i]>=0 ? 1 : -1) * (cosT>=0 ? 1 : -1);
+                if(sign>0){
+                    colAttr.setXYZ(i, bc.r*posPhase, bc.g*posPhase, bc.b*posPhase);
+                } else {
+                    colAttr.setXYZ(i, negPhase, negPhase, negPhase);
+                }
             }
+            colAttr.needsUpdate=true;
         }
-        colAttr.needsUpdate=true;
         wCloud.material.opacity=0.92;
     }
 
@@ -8465,23 +8493,14 @@ window.wTick=function(){
         }
         pos2.needsUpdate=true;
         ca.needsUpdate=true;
-        // Lift wire lines to match mesh deformation
+        // Lift wire lines using pre-cached psi values — no Rnl/Ylm per frame
         if(wPlaneWire && wPlaneWire.isGroup){
-            var maxPsiRaw=wPlaneMesh.geometry.userData.maxPsiRaw||1;
             wPlaneWire.children.forEach(function(ln){
                 var lp=ln.geometry.attributes.position;
+                var pc=ln.geometry.userData.psiCache;
+                if(!pc) return;
                 for(var j=0;j<lp.count;j++){
-                    var ox=lp.getX(j), oz=lp.getZ(j);
-                    var r3=Math.sqrt(ox*ox+oz*oz);
-                    if(r3<0.1){
-                        // Use actual Ψ at origin (critical for s-orbitals which peak there)
-                        var pv0=Rnl(wN,wL,0.001)*Ylm(wL,wM,Math.PI/2,0);
-                        lp.setY(j,(pv0/maxPsiRaw)*ct*ys);
-                        continue;
-                    }
-                    var phi3=Math.atan2(oz,ox);
-                    var pvRaw=Rnl(wN,wL,r3/SCALE)*Ylm(wL,wM,Math.PI/2,phi3);
-                    lp.setY(j, (pvRaw/maxPsiRaw)*ct*ys);
+                    lp.setY(j, (pc[j]||0)*ct*ys);
                 }
                 lp.needsUpdate=true;
             });
@@ -8493,7 +8512,7 @@ window.wTick=function(){
 
 // ── BUILD & SELECT ────────────────────────────────────────────────────
 function wBuild(n,l,m){
-    wN=n; wL=l; wM=m;
+    wN=n; wL=l; wM=m; _wLastCosT=2; _wDirty=true;
     var sz=maxR_bohr(n)*SCALE;
     buildWAxes(sz);
     buildCloud(n,l,m);
@@ -15645,6 +15664,8 @@ var SC=15; // must match MOT engine's SC=15
 function _msTb(id,on){var b=document.getElementById(id);if(!b)return;b.classList.toggle('on',on);var d=b.querySelector('.bdg');if(d)d.textContent=on?'ON':'OFF';}
 
 function _msMat(col,isBack){
+  var op=_ms.surfOp;
+  var transp=op<0.999;
   var c=new THREE.Color(col);
   return new THREE.MeshPhongMaterial({
     color:c,
@@ -15652,9 +15673,9 @@ function _msMat(col,isBack){
     shininess:80,
     specular:new THREE.Color(0x223344),
     side:isBack?THREE.BackSide:THREE.FrontSide,
-    transparent:false,
-    opacity:1.0,
-    depthWrite:true,
+    transparent:transp,
+    opacity:op,
+    depthWrite:!transp,
     polygonOffset:isBack,
     polygonOffsetFactor:isBack?1:0,
     polygonOffsetUnits:isBack?1:0
@@ -15718,10 +15739,13 @@ window.motsDrToggle=function(k){
   _ms._dirty=true;
 };
 window.motsDrAdj=function(k,v){
-  if(k==='surfop'){_ms.surfOp=v;var l=document.getElementById('mots-vsop');if(l)l.textContent=v.toFixed(2);Object.keys(_ms.surfaces).forEach(function(id){(_ms.surfaces[id].meshes||[]).forEach(function(m){if(m.material){m.material.opacity=v;m.material.transparent=v<0.999;m.material.depthWrite=v>=0.999;m.material.needsUpdate=true;}});});_ms._dirty=true;}
+  if(k==='surfop'){_ms.surfOp=v;var lbl=document.getElementById('mots-vsop');if(lbl)lbl.textContent=v.toFixed(2);var transp=v<0.999;Object.keys(_ms.surfaces).forEach(function(id){(_ms.surfaces[id].meshes||[]).forEach(function(m){if(m.material){m.material.opacity=v;m.material.transparent=transp;m.material.depthWrite=!transp;m.material.needsUpdate=true;}});});_ms._dirty=true;}
 };
 window.motsSetDLabel=function(v){
-  var el=document.getElementById('mots-d-val');if(el)el.textContent=(+v).toFixed(1)+' a\u2080';
+  var t=(+v).toFixed(1)+' a₀';
+  var el=document.getElementById('mots-d-val');if(el)el.textContent=t;
+  var ep=document.getElementById('mots-d-val-panel');if(ep)ep.textContent=t;
+  var sp=document.getElementById('mots-d-slider-panel');if(sp)sp.value=v;
 };
 window.motsRebuild=function(v){
   _msUserD=+v;
@@ -16165,7 +16189,7 @@ function _makeGeom(verts){
 // ── Build MO surface ──────────────────────────────────────────────────
 function _msBuild(n,l,m,isAnti,key){
   if(!_ms.inited)_motsbInit();
-  if(typeof toast==='function')toast('Computing MO surface…');
+  if(typeof showLoader==='function')showLoader('mot');
 
   setTimeout(function(){
     var pb=_getPb(l,m,isAnti);
@@ -16177,22 +16201,25 @@ function _msBuild(n,l,m,isAnti,key){
     var dSlider=document.getElementById('mots-d-slider');
     var dVal=document.getElementById('mots-d-val');
     if(dSlider){dSlider.max=Math.max(200,Math.ceil(d*3));dSlider.value=d;}
-    if(dVal)dVal.textContent=d.toFixed(1)+' a\u2080';
+    var dSliderP=document.getElementById('mots-d-slider-panel');if(dSliderP){dSliderP.max=Math.max(200,Math.ceil(d*3));dSliderP.value=d;}
+    if(dVal)dVal.textContent=d.toFixed(1)+' a₀';
+    var dValP=document.getElementById('mots-d-val-panel');if(dValP)dValP.textContent=d.toFixed(1)+' a₀';
 
     // Update nuclei positions
     _msNuclei(dSc);
 
-    // Determine grid bounds — must contain entire orbital
-    var orbRadius=Math.max(n*n*SC*2.5, dSc*4.0, 200);
+    // Determine grid bounds — must fully contain orbital lobes
+    // n²·SC·5 covers the 90% density radius for all n up to ~35
+    var orbRadius=Math.max(n*n*SC*5.0, dSc*4.0, 200);
     var bound=orbRadius;
-    // Fixed step size ~5 units ensures thin features are captured
-    // gridN = 2*bound/step, capped at 160 for performance
-    var step=Math.max(4, bound/70);
-    var gridN=Math.min(160, Math.max(60, Math.round(2*bound/step)));
+    // Adaptive step: coarser for large orbitals to control cell count
+    // target ~80 cells across, capped so gridN stays 60–100
+    var step=Math.max(6, bound/50);
+    var gridN=Math.min(100, Math.max(60, Math.round(2*bound/step)));
 
-    // Find peak |ψ| — systematic grid sampling near nuclei for accuracy
+    // Find peak |ψ| — fewer samples for speed, still accurate
     var peak=0;
-    var nSamp=Math.max(1000, n*150);
+    var nSamp=Math.max(600, n*60);
     for(var i=0;i<nSamp;i++){
       // Sample uniformly within bound sphere
       var rr=Math.cbrt(Math.random())*bound;
@@ -16256,6 +16283,7 @@ function _msBuild(n,l,m,isAnti,key){
     _ms.surfaces[key]={meshes:meshes,n:n,l:l,m:m,isAnti:isAnti};
     _ms._dirty=true;
     _msRefresh();
+    if(typeof hideLoader==='function')hideLoader();
     if(typeof toast==='function')toast((isAnti?'*':'')+_orbLbl(n,l,m)+' MO surface');
   },20);
 }
@@ -16290,5 +16318,6 @@ function _msRefresh(){
 </script>
 </body>
 </html>
+
 
 
